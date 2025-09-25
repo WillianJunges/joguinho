@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Quadrado vs Monstros</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    canvas {
+      display: block;
+      background: #111;
+      margin: 0 auto;
+    }
+
+    #upgradeScreen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 800px;
+      height: 600px;
+      background: rgba(0, 0, 0, 0.95);
+      color: white;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: sans-serif;
+    }
+
+    #upgradeScreen h1 {
+      margin-bottom: 20px;
+    }
+
+    .upgrade-btn {
+      background: #333;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      margin: 5px;
+      font-size: 16px;
+      cursor: pointer;
+      width: 280px;
+      transition: background 0.3s;
+    }
+
+    .upgrade-btn:hover {
+      background: #555;
+    }
+
+    .upgrade-btn:disabled {
+      background: #222;
+      color: #777;
+      cursor: not-allowed;
+    }
+
+    .currency-display {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+
+    .upgrade-info {
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    .upgrades-container {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 20px;
+    }
+
+    .ally-counts {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 15px;
+    }
+
+    .ally-count {
+      padding: 5px 10px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<!-- TELA DE UPGRADE -->
+<div id="upgradeScreen">
+  <h1>Você perdeu!</h1>
+  <div class="currency-display">Moedas: <span id="coinsDisplay">0</span></div>
+  <div class="upgrade-info">
+    <p id="finalKillsText">Kills: 0</p>
+    <p>Dano atual: <span id="currentDamage">1</span></p>
+    <p>Nível Bola de Fogo: <span id="currentFireballLevel">0</span></p>
+  </div>
+  
+  <div class="ally-counts">
+    <div class="ally-count">Guerreiros: <span id="warriorCount">0</span>/3</div>
+    <div class="ally-count">Arqueiros: <span id="archerCount">0</span>/3</div>
+    <div class="ally-count">Magos: <span id="mageCount">0</span>/2</div>
+  </div>
+  
+  <div class="upgrades-container">
+    <button class="upgrade-btn" id="upgradeDamageBtn">Upgrade de Dano (+1) - Custo: 5 moedas</button>
+    <button class="upgrade-btn" id="upgradeFireballBtn">Bola de Fogo (Dano em área) - Custo: 15 moedas</button>
+    <button class="upgrade-btn" id="upgradeWarriorBtn">Guerreiro (Corpo a corpo) - Custo: 30 moedas</button>
+    <button class="upgrade-btn" id="upgradeArcherBtn">Arqueiro (Atira à distância) - Custo: 40 moedas</button>
+    <button class="upgrade-btn" id="upgradeMageBtn">Mago (Dano em área) - Custo: 60 moedas</button>
+  </div>
+  <button class="upgrade-btn" id="restartBtn">Jogar Novamente</button>
+</div>
+
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const upgradeScreen = document.getElementById("upgradeScreen");
+  const finalKillsText = document.getElementById("finalKillsText");
+  const coinsDisplay = document.getElementById("coinsDisplay");
+  const currentDamage = document.getElementById("currentDamage");
+  const currentFireballLevel = document.getElementById("currentFireballLevel");
+  const warriorCount = document.getElementById("warriorCount");
+  const archerCount = document.getElementById("archerCount");
+  const mageCount = document.getElementById("mageCount");
+  
+  const upgradeDamageBtn = document.getElementById("upgradeDamageBtn");
+  const upgradeFireballBtn = document.getElementById("upgradeFireballBtn");
+  const upgradeWarriorBtn = document.getElementById("upgradeWarriorBtn");
+  const upgradeArcherBtn = document.getElementById("upgradeArcherBtn");
+  const upgradeMageBtn = document.getElementById("upgradeMageBtn");
+  const restartBtn = document.getElementById("restartBtn");
+
+  const player = {
+    x: canvas.width / 2,
+    y: canvas.height / 2,
+    size: 20,
+    color: "white",
+    hp: 5,
+    maxHp: 5
+  };
+
+  let bullets = [];
+  let enemies = [];
+  let allies = [];
+  let explosions = [];
+
+  let gameOver = false;
+  let kills = 0;
+  let coins = 0;
+
+  // Sistema de upgrades
+  let bulletDamage = 1;
+  let damageUpgradeCost = 5;
+
+  let fireballLevel = 0;
+  let fireballUpgradeCost = 15;
+  const fireballRadius = 40;
+
+  // Sistema de aliados
+  let warriors = [];
+  let archers = [];
+  let mages = [];
+  
+  let warriorUpgradeCost = 30;
+  let archerUpgradeCost = 40;
+  let mageUpgradeCost = 60;
+
+  // Tiro automático
+  let mouseX = canvas.width / 2;
+  let mouseY = canvas.height / 2;
+
+  // Dificuldade
+  let enemySpawnRate = 1000;
+  let enemyHpMultiplier = 1;
+  let currentSpawnInterval;
+
+  canvas.addEventListener("mousemove", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = e.clientX - rect.left;
+    mouseY = e.clientY - rect.top;
+  });
+
+  function spawnEnemy() {
+    const size = 30;
+    let x, y;
+
+    const side = Math.floor(Math.random() * 4);
+    switch (side) {
+      case 0: x = Math.random() * canvas.width; y = -size; break;
+      case 1: x = Math.random() * canvas.width; y = canvas.height + size; break;
+      case 2: x = -size; y = Math.random() * canvas.height; break;
+      case 3: x = canvas.width + size; y = Math.random() * canvas.height; break;
+    }
+
+    const angle = Math.atan2(player.y - y, player.x - x);
+    const speed = 1 + Math.random();
+    const baseHp = 1;
+    const hp = Math.ceil(baseHp * enemyHpMultiplier);
+
+    enemies.push({ 
+      x, y, size, speed, angle, hp, maxHp: hp,
+      beingPushed: false, pushX: 0, pushY: 0, pushFrames: 0
+    });
+  }
+
+  function shootBullet(targetX, targetY) {
+    const angle = Math.atan2(targetY - player.y, targetX - player.x);
+    const speed = 5;
+    
+    bullets.push({
+      x: player.x,
+      y: player.y,
+      size: 5,
+      speed,
+      angle,
+      damage: bulletDamage,
+      isFireball: fireballLevel > 0 && Math.random() < (fireballLevel * 0.1)
+    });
+  }
+
+  // GUERREIRO - Ataca corpo a corpo
+  function updateWarriors() {
+    warriors.forEach(warrior => {
+      // Encontrar inimigo mais próximo
+      let closestEnemy = null;
+      let minDistance = Infinity;
+      
+      enemies.forEach(enemy => {
+        const dx = enemy.x - warrior.x;
+        const dy = enemy.y - warrior.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < minDistance && distance < 150) { // Raio de ataque do guerreiro
+          minDistance = distance;
+          closestEnemy = enemy;
+        }
+      });
+      
+      // Mover em direção ao inimigo ou voltar para posição inicial
+      if (closestEnemy) {
+        const angle = Math.atan2(closestEnemy.y - warrior.y, closestEnemy.x - warrior.x);
+        warrior.x += Math.cos(angle) * 2;
+        warrior.y += Math.sin(angle) * 2;
+        
+        // Atacar se estiver próximo
+        if (minDistance < 30) {
+          closestEnemy.hp -= bulletDamage * 0.4;
+          
+          // Empurrar o inimigo
+          closestEnemy.beingPushed = true;
+          closestEnemy.pushX = Math.cos(angle) * 8;
+          closestEnemy.pushY = Math.sin(angle) * 8;
+          closestEnemy.pushFrames = 10;
+          
+          if (closestEnemy.hp <= 0) {
+            const index = enemies.indexOf(closestEnemy);
+            if (index > -1) {
+              enemies.splice(index, 1);
+              kills++;
+              coins++;
+            }
+          }
+        }
+      } else {
+        // Voltar para posição inicial
+        const angleToCenter = Math.atan2(player.y - warrior.y, player.x - warrior.x);
+        const distanceToCenter = Math.sqrt(
+          Math.pow(player.x - warrior.x, 2) + Math.pow(player.y - warrior.y, 2)
+        );
+        
+        if (distanceToCenter > 60) {
+          warrior.x += Math.cos(angleToCenter) * 2;
+          warrior.y += Math.sin(angleToCenter) * 2;
+        }
+      }
+    });
+  }
+
+  // ARQUEIRO - Atira à distância
+  function updateArchers() {
+    archers.forEach(archer => {
+      if (enemies.length > 0) {
+        // Encontrar inimigo mais próximo
+        let closestEnemy = null;
+        let minDistance = Infinity;
+        
+        enemies.forEach(enemy => {
+          const dx = enemy.x - archer.x;
+          const dy = enemy.y - archer.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance < minDistance && distance < 300) {
+            minDistance = distance;
+            closestEnemy = enemy;
+          }
+        });
+        
+        // Atirar no inimigo mais próximo
+        if (closestEnemy && archer.cooldown <= 0) {
+          const angle = Math.atan2(closestEnemy.y - archer.y, closestEnemy.x - archer.x);
+          bullets.push({
+            x: archer.x,
+            y: archer.y,
+            size: 4,
+            speed: 4,
+            angle,
+            damage: bulletDamage * 0.7,
+            isFireball: false,
+            fromAlly: true
+          });
+          archer.cooldown = 60; // 1 segundo a 60fps
+        }
+      }
+      
+      if (archer.cooldown > 0) archer.cooldown--;
+      
+      // Manter posição relativa ao jogador
+      const angleToPlayer = Math.atan2(player.y - archer.y, player.x - archer.x);
+      const distanceToPlayer = Math.sqrt(
+        Math.pow(player.x - archer.x, 2) + Math.pow(player.y - archer.y, 2)
+      );
+      
+      if (distanceToPlayer > 80) {
+        archer.x += Math.cos(angleToPlayer) * 1.5;
+        archer.y += Math.sin(angleToPlayer) * 1.5;
+      }
+    });
+  }
+
+  // MAGO - Atira lentamente com dano em área
+  function updateMages() {
+    mages.forEach(mage => {
+      if (enemies.length > 0) {
+        // Encontrar inimigo mais próximo
+        let closestEnemy = null;
+        let minDistance = Infinity;
+        
+        enemies.forEach(enemy => {
+          const dx = enemy.x - mage.x;
+          const dy = enemy.y - mage.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance < minDistance && distance < 400) {
+            minDistance = distance;
+            closestEnemy = enemy;
+          }
+        });
+        
+        // Atirar no inimigo mais próximo
+        if (closestEnemy && mage.cooldown <= 0) {
+          const angle = Math.atan2(closestEnemy.y - mage.y, closestEnemy.x - mage.x);
+          bullets.push({
+            x: mage.x,
+            y: mage.y,
+            size: 8,
+            speed: 3,
+            angle,
+            damage: bulletDamage * 2.0,
+            isFireball: true,
+            fromAlly: true,
+            explosionRadius: 50
+          });
+          mage.cooldown = 180; // 3 segundos a 60fps
+        }
+      }
+      
+      if (mage.cooldown > 0) mage.cooldown--;
+      
+      // Manter posição relativa ao jogador
+      const angleToPlayer = Math.atan2(player.y - mage.y, player.x - mage.x);
+      const distanceToPlayer = Math.sqrt(
+        Math.pow(player.x - mage.x, 2) + Math.pow(player.y - mage.y, 2)
+      );
+      
+      if (distanceToPlayer > 100) {
+        mage.x += Math.cos(angleToPlayer) * 1;
+        mage.y += Math.sin(angleToPlayer) * 1;
+      }
+    });
+  }
+
+  function createExplosion(x, y, radius = fireballRadius) {
+    explosions.push({
+      x,
+      y,
+      radius: 0,
+      maxRadius: radius,
+      duration: 0,
+      maxDuration: 20
+    });
+  }
+
+  function checkCircleRectCollision(circle, rect) {
+    const closestX = Math.max(rect.x - rect.size/2, Math.min(circle.x, rect.x + rect.size/2));
+    const closestY = Math.max(rect.y - rect.size/2, Math.min(circle.y, rect.y + rect.size/2));
+    
+    const distanceX = circle.x - closestX;
+    const distanceY = circle.y - closestY;
+    
+    return (distanceX * distanceX + distanceY * distanceY) < (circle.radius * circle.radius);
+  }
+
+  setInterval(() => {
+    if (!gameOver) {
+      shootBullet(mouseX, mouseY);
+    }
+  }, 200);
+
+  function checkCollision(a, b) {
+    return (
+      a.x < b.x + b.size &&
+      a.x + a.size > b.x &&
+      a.y < b.y + b.size &&
+      a.y + a.size > b.y
+    );
+  }
+
+  function update() {
+    if (gameOver) return;
+
+    // Atualizar balas
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      const b = bullets[i];
+      b.x += Math.cos(b.angle) * b.speed;
+      b.y += Math.sin(b.angle) * b.speed;
+
+      if (b.x < 0 || b.x > canvas.width || b.y < 0 || b.y > canvas.height) {
+        bullets.splice(i, 1);
+        continue;
+      }
+
+      for (let ei = enemies.length - 1; ei >= 0; ei--) {
+        const e = enemies[ei];
+        
+        if (checkCollision(b, e)) {
+          if (b.isFireball) {
+            createExplosion(b.x, b.y, b.explosionRadius || fireballRadius);
+            
+            for (let ej = enemies.length - 1; ej >= 0; ej--) {
+              const enemy = enemies[ej];
+              if (checkCircleRectCollision({x: b.x, y: b.y, radius: b.explosionRadius || fireballRadius}, enemy)) {
+                enemy.hp -= b.damage;
+                
+                if (enemy.hp <= 0) {
+                  enemies.splice(ej, 1);
+                  kills++;
+                  coins++;
+                  if (ej < ei) ei--;
+                }
+              }
+            }
+          } else {
+            e.hp -= b.damage;
+            
+            if (e.hp <= 0) {
+              enemies.splice(ei, 1);
+              kills++;
+              coins++;
+            }
+          }
+          
+          bullets.splice(i, 1);
+          break;
+        }
+      }
+    }
+
+    // Atualizar explosões
+    for (let i = explosions.length - 1; i >= 0; i--) {
+      const exp = explosions[i];
+      exp.radius += exp.maxRadius / 10;
+      exp.duration++;
+      
+      if (exp.duration >= exp.maxDuration) {
+        explosions.splice(i, 1);
+      }
+    }
+
+    // Atualizar inimigos
+    for (let ei = enemies.length - 1; ei >= 0; ei--) {
+      const e = enemies[ei];
+      
+      if (e.beingPushed) {
+        e.x += e.pushX;
+        e.y += e.pushY;
+        e.pushFrames--;
+        
+        if (e.pushFrames <= 0) {
+          e.beingPushed = false;
+        }
+      } else {
+        e.x += Math.cos(e.angle) * e.speed;
+        e.y += Math.sin(e.angle) * e.speed;
+      }
+
+      // Verificar colisão com jogador (não morre, mas perde vida)
+      if (checkCollision(e, player)) {
+        player.hp -= 0.1; // Dano gradual
+        if (player.hp <= 0) {
+          triggerGameOver();
+          break;
+        }
+      }
+    }
+
+    // Atualizar aliados
+    updateWarriors();
+    updateArchers();
+    updateMages();
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Informações da UI
+    ctx.fillStyle = "white";
+    ctx.font = "16px sans-serif";
+    ctx.fillText("Kills: " + kills, 10, 20);
+    ctx.fillText("Dano: " + bulletDamage, 700, 20);
+    ctx.fillText("Moedas: " + coins, 10, 40);
+    ctx.fillText("Bola de Fogo: " + fireballLevel, 10, 60);
+    ctx.fillText("Vida: " + player.hp.toFixed(1), 10, 80);
+
+    // Barra de vida do jogador
+    ctx.fillStyle = "red";
+    ctx.fillRect(60, 70, 100, 10);
+    ctx.fillStyle = "green";
+    ctx.fillRect(60, 70, 100 * (player.hp / player.maxHp), 10);
+
+    // Jogador
+    ctx.fillStyle = player.color;
+    ctx.fillRect(player.x - player.size / 2, player.y - player.size / 2, player.size, player.size);
+
+    // Guerreiros (vermelho escuro)
+    ctx.fillStyle = "#8B0000";
+    warriors.forEach(warrior => {
+      ctx.fillRect(warrior.x - warrior.size / 2, warrior.y - warrior.size / 2, warrior.size, warrior.size);
+    });
+
+    // Arqueiros (verde)
+    ctx.fillStyle = "#006400";
+    archers.forEach(archer => {
+      ctx.fillRect(archer.x - archer.size / 2, archer.y - archer.size / 2, archer.size, archer.size);
+    });
+
+    // Magos (roxo)
+    ctx.fillStyle = "#4B0082";
+    mages.forEach(mage => {
+      ctx.fillRect(mage.x - mage.size / 2, mage.y - mage.size / 2, mage.size, mage.size);
+    });
+
+    // Balas
+    bullets.forEach(b => {
+      ctx.fillStyle = b.isFireball ? "orange" : (b.fromAlly ? "yellow" : "cyan");
+      ctx.fillRect(b.x - b.size / 2, b.y - b.size / 2, b.size, b.size);
+    });
+
+    // Explosões
+    explosions.forEach(exp => {
+      ctx.beginPath();
+      ctx.arc(exp.x, exp.y, exp.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 165, 0, ${1 - exp.duration/exp.maxDuration})`;
+      ctx.fill();
+    });
+
+    // Inimigos
+    enemies.forEach(e => {
+      ctx.fillStyle = "red";
+      ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2, e.size, e.size);
+
+      // Barra de vida
+      ctx.fillStyle = "green";
+      const healthRatio = e.hp / e.maxHp;
+      ctx.fillRect(e.x - e.size / 2, e.y - e.size / 2 - 8, e.size * healthRatio, 4);
+    });
+  }
+
+  function loop() {
+    update();
+    draw();
+    if (!gameOver) {
+      requestAnimationFrame(loop);
+    }
+  }
+
+  function startEnemySpawner() {
+    if (currentSpawnInterval) clearInterval(currentSpawnInterval);
+    currentSpawnInterval = setInterval(() => {
+      if (!gameOver) spawnEnemy();
+    }, enemySpawnRate);
+  }
+
+  // Aumenta dificuldade com o tempo
+  setInterval(() => {
+    if (!gameOver && enemySpawnRate > 300) {
+      enemySpawnRate -= 100;
+      startEnemySpawner();
+    }
+  }, 10000);
+
+  setInterval(() => {
+    if (!gameOver) {
+      enemyHpMultiplier *= 1.05;
+    }
+  }, 15000);
+
+  function triggerGameOver() {
+    gameOver = true;
+    finalKillsText.textContent = "Kills: " + kills;
+    coinsDisplay.textContent = coins;
+    currentDamage.textContent = bulletDamage;
+    currentFireballLevel.textContent = fireballLevel;
+    warriorCount.textContent = warriors.length;
+    archerCount.textContent = archers.length;
+    mageCount.textContent = mages.length;
+    updateUpgradeButtons();
+    upgradeScreen.style.display = "flex";
+  }
+
+  function updateUpgradeButtons() {
+    upgradeDamageBtn.textContent = `Upgrade de Dano (+1) - Custo: ${damageUpgradeCost} moedas`;
+    upgradeFireballBtn.textContent = `Bola de Fogo (Nível ${fireballLevel + 1}) - Custo: ${fireballUpgradeCost} moedas`;
+    upgradeWarriorBtn.textContent = `Guerreiro (${warriors.length}/3) - Custo: ${warriorUpgradeCost} moedas`;
+    upgradeArcherBtn.textContent = `Arqueiro (${archers.length}/3) - Custo: ${archerUpgradeCost} moedas`;
+    upgradeMageBtn.textContent = `Mago (${mages.length}/2) - Custo: ${mageUpgradeCost} moedas`;
+    
+    upgradeDamageBtn.disabled = coins < damageUpgradeCost;
+    upgradeFireballBtn.disabled = coins < fireballUpgradeCost;
+    upgradeWarriorBtn.disabled = coins < warriorUpgradeCost || warriors.length >= 3;
+    upgradeArcherBtn.disabled = coins < archerUpgradeCost || archers.length >= 3;
+    upgradeMageBtn.disabled = coins < mageUpgradeCost || mages.length >= 2;
+  }
+
+  function resetGame() {
+    bullets = [];
+    enemies = [];
+    warriors = [];
+    archers = [];
+    mages = [];
+    explosions = [];
+    kills = 0;
+    coins = 0;
+    gameOver = false;
+
+    player.x = canvas.width / 2;
+    player.y = canvas.height / 2;
+    player.hp = player.maxHp;
+
+    enemySpawnRate = 1000;
+    enemyHpMultiplier = 1;
+
+    upgradeScreen.style.display = "none";
+    startEnemySpawner();
+    loop();
+  }
+
+  function addWarrior() {
+    if (warriors.length < 3) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 40;
+      
+      warriors.push({
+        x: player.x + Math.cos(angle) * distance,
+        y: player.y + Math.sin(angle) * distance,
+        size: 18
+      });
+    }
+  }
+
+  function addArcher() {
+    if (archers.length < 3) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 70;
+      
+      archers.push({
+        x: player.x + Math.cos(angle) * distance,
+        y: player.y + Math.sin(angle) * distance,
+        size: 16,
+        cooldown: 0
+      });
+    }
+  }
+
+  function addMage() {
+    if (mages.length < 2) {
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 90;
+      
+      mages.push({
+        x: player.x + Math.cos(angle) * distance,
+        y: player.y + Math.sin(angle) * distance,
+        size: 20,
+        cooldown: 0
+      });
+    }
+  }
+
+  // Event listeners para upgrades
+  upgradeDamageBtn.addEventListener("click", () => {
+    if (coins >= damageUpgradeCost) {
+      coins -= damageUpgradeCost;
+      bulletDamage += 1;
+      damageUpgradeCost = Math.floor(damageUpgradeCost * 1.5);
+      updateUpgradeButtons();
+    }
+  });
+
+  upgradeFireballBtn.addEventListener("click", () => {
+    if (coins >= fireballUpgradeCost) {
+      coins -= fireballUpgradeCost;
+      fireballLevel += 1;
+      fireballUpgradeCost = Math.floor(fireballUpgradeCost * 1.8);
+      updateUpgradeButtons();
+    }
+  });
+
+  upgradeWarriorBtn.addEventListener("click", () => {
+    if (coins >= warriorUpgradeCost && warriors.length < 3) {
+      coins -= warriorUpgradeCost;
+      addWarrior();
+      warriorUpgradeCost = Math.floor(warriorUpgradeCost * 1.8);
+      updateUpgradeButtons();
+    }
+  });
+
+  upgradeArcherBtn.addEventListener("click", () => {
+    if (coins >= archerUpgradeCost && archers.length < 3) {
+      coins -= archerUpgradeCost;
+      addArcher();
+      archerUpgradeCost = Math.floor(archerUpgradeCost * 1.8);
+      updateUpgradeButtons();
+    }
+  });
+
+  upgradeMageBtn.addEventListener("click", () => {
+    if (coins >= mageUpgradeCost && mages.length < 2) {
+      coins -= mageUpgradeCost;
+      addMage();
+      mageUpgradeCost = Math.floor(mageUpgradeCost * 2.2);
+      updateUpgradeButtons();
+    }
+  });
+
+  restartBtn.addEventListener("click", () => {
+    resetGame();
+  });
+
+  // Inicia o jogo
+  startEnemySpawner();
+  loop();
+</script>
+</body>
+</html>
