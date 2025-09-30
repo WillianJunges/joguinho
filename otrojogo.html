@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Tower Defense Simples</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #111;
+      cursor: crosshair;
+    }
+    canvas {
+      display: block;
+      background: #222;
+    }
+    #restartBtn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      padding: 10px 20px;
+      background: #fff;
+      color: #000;
+      border: none;
+      border-radius: 5px;
+      display: none;
+      z-index: 10;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+<button id="restartBtn">🔁 Recomeçar</button>
+
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  const restartBtn = document.getElementById("restartBtn");
+
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  let center, bullets, enemies, mouse, gameOver, score, startTime, enemySpeed, spawnInterval;
+  let spawnTimer;
+
+  function initGame() {
+    center = {
+      x: canvas.width / 2,
+      y: canvas.height / 2,
+      size: 30
+    };
+
+    bullets = [];
+    enemies = [];
+    mouse = { x: center.x, y: center.y };
+    gameOver = false;
+    score = 0;
+    startTime = Date.now();
+    enemySpeed = 1.2;
+    spawnInterval = 1500;
+
+    restartBtn.style.display = "none";
+
+    spawnEnemy();
+    update();
+  }
+
+  function spawnEnemy() {
+    if (gameOver) return;
+
+    const size = 20;
+    let x, y;
+
+    const side = Math.floor(Math.random() * 4);
+    if (side === 0) { x = Math.random() * canvas.width; y = -size; }
+    if (side === 1) { x = canvas.width + size; y = Math.random() * canvas.height; }
+    if (side === 2) { x = Math.random() * canvas.width; y = canvas.height + size; }
+    if (side === 3) { x = -size; y = Math.random() * canvas.height; }
+
+    const angle = Math.atan2(center.y - y, center.x - x);
+
+    enemies.push({ x, y, size, speed: enemySpeed, angle });
+
+    spawnTimer = setTimeout(spawnEnemy, spawnInterval);
+  }
+
+  // Atirar
+  canvas.addEventListener("click", (e) => {
+    if (gameOver) return;
+    const angle = Math.atan2(e.clientY - center.y, e.clientX - center.x);
+    bullets.push({
+      x: center.x,
+      y: center.y,
+      size: 5,
+      speed: 6,
+      angle
+    });
+  });
+
+  // Atualizar jogo
+  function update() {
+    if (gameOver) return;
+
+    const elapsed = (Date.now() - startTime) / 1000;
+
+    // Aumentar dificuldade após 30 segundos
+    if (elapsed > 30 && spawnInterval > 700) {
+      spawnInterval = 700;
+      enemySpeed = 1.8;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Desenhar torre
+    ctx.fillStyle = "#0f0";
+    ctx.fillRect(center.x - center.size/2, center.y - center.size/2, center.size, center.size);
+
+    // Balas
+    ctx.fillStyle = "#0ff";
+    bullets.forEach((b, i) => {
+      b.x += Math.cos(b.angle) * b.speed;
+      b.y += Math.sin(b.angle) * b.speed;
+
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, b.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (
+        b.x < 0 || b.x > canvas.width ||
+        b.y < 0 || b.y > canvas.height
+      ) {
+        bullets.splice(i, 1);
+      }
+    });
+
+    // Inimigos
+    ctx.fillStyle = "#f00";
+    enemies.forEach((enemy, ei) => {
+      enemy.x += Math.cos(enemy.angle) * enemy.speed;
+      enemy.y += Math.sin(enemy.angle) * enemy.speed;
+
+      ctx.beginPath();
+      ctx.arc(enemy.x, enemy.y, enemy.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Colisão com torre
+      const distToCenter = Math.hypot(enemy.x - center.x, enemy.y - center.y);
+      if (distToCenter < enemy.size + center.size / 2) {
+        endGame();
+      }
+
+      // Colisão com bala
+      bullets.forEach((b, bi) => {
+        const dist = Math.hypot(b.x - enemy.x, b.y - enemy.y);
+        if (dist < enemy.size + b.size) {
+          enemies.splice(ei, 1);
+          bullets.splice(bi, 1);
+          score++;
+        }
+      });
+    });
+
+    // Pontuação
+    ctx.fillStyle = "#fff";
+    ctx.font = "20px Arial";
+    ctx.fillText("Score: " + score, 20, 30);
+    ctx.fillText("Tempo: " + Math.floor(elapsed) + "s", 20, 60);
+
+    requestAnimationFrame(update);
+  }
+
+  function endGame() {
+    gameOver = true;
+    clearTimeout(spawnTimer);
+    showGameOver();
+  }
+
+  function showGameOver() {
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "50px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 20);
+    ctx.font = "30px Arial";
+    ctx.fillText("Pontuação: " + score, canvas.width / 2, canvas.height / 2 + 30);
+
+    restartBtn.style.display = "block";
+  }
+
+  restartBtn.addEventListener("click", () => {
+    initGame();
+  });
+
+  // Começar o jogo
+  initGame();
+</script>
+
+</body>
+</html>
